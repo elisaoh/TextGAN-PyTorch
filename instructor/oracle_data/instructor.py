@@ -9,6 +9,7 @@
 
 import os
 import torch
+import torch.nn as nn
 
 import config as cfg
 from models.Oracle import Oracle
@@ -19,8 +20,8 @@ from utils.text_process import write_tensor
 
 class BasicInstructor:
     def __init__(self, opt):
-        self.log = create_logger(__name__, silent=False, to_disk=False if cfg.if_test else True,
-                                 log_file=None if cfg.if_test
+        self.log = create_logger(__name__, silent=False, to_disk=True,
+                                 log_file=cfg.log_filename if cfg.if_test
                                  else [cfg.log_filename, cfg.save_root + 'log.txt'])
         self.sig = Signal(cfg.signal_file)
         self.opt = opt
@@ -28,14 +29,23 @@ class BasicInstructor:
         # oracle, generator, discriminator
         self.oracle = Oracle(cfg.gen_embed_dim, cfg.gen_hidden_dim, cfg.vocab_size, cfg.max_seq_len,
                              cfg.padding_idx, gpu=cfg.CUDA)
+        self.dis = None
 
         self.show_config()
 
         # DataLoader
         if not os.path.exists(cfg.oracle_samples_path.format(cfg.samples_num)) or not cfg.oracle_pretrain:
             create_oracle()
+            self.oracle.load_state_dict(torch.load(cfg.oracle_state_dict_path))
         self.oracle_samples = torch.load(cfg.oracle_samples_path.format(cfg.samples_num))
         self.oracle_data = GenDataIter(self.oracle_samples)
+
+        self.gen_data = None
+        self.dis_data = None
+
+        # Criterion
+        self.mle_criterion = nn.NLLLoss()
+        self.dis_criterion = None
 
     def _run(self):
         print('Nothing to run in Basic Instructor!')
@@ -56,7 +66,7 @@ class BasicInstructor:
             self.dis.load_state_dict(torch.load(cfg.pretrained_dis_path))
         if cfg.gen_pretrain:
             self.log.info('Load MLE pretrained generator gen: {}'.format(cfg.pretrained_gen_path))
-            self.gen.load_state_dict(torch.load(cfg.pretrained_gen_path))
+            self.gen.load_state_dict(torch.load(cfg.pretrained_gen_path, map_location='cuda:{}'.format(cfg.device)))
 
         if cfg.CUDA:
             self.oracle = self.oracle.cuda()
@@ -144,6 +154,8 @@ class BasicInstructor:
     def optimize(opt, loss, model=None, retain_graph=False):
         opt.zero_grad()
         loss.backward(retain_graph=retain_graph)
+        if model is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.clip_norm)
         opt.step()
 
     def show_config(self):

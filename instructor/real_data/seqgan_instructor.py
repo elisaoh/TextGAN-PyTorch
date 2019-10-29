@@ -33,6 +33,7 @@ class SeqGANInstructor(BasicInstructor):
 
         # Optimizer
         self.gen_opt = optim.Adam(self.gen.parameters(), lr=cfg.gen_lr)
+        self.gen_adv_opt = optim.Adam(self.gen.parameters(), lr=cfg.gen_lr)
         self.dis_opt = optim.Adam(self.dis.parameters(), lr=cfg.dis_lr)
 
         # Criterion
@@ -41,11 +42,13 @@ class SeqGANInstructor(BasicInstructor):
 
         # DataLoader
         self.gen_data = GenDataIter(self.gen.sample(cfg.batch_size, cfg.batch_size))
-        self.dis_data = DisDataIter(self.gen_data.random_batch()['target'], self.oracle_data.random_batch()['target'])
+        self.dis_data = DisDataIter(self.train_data.random_batch()['target'], self.gen_data.random_batch()['target'])
 
         # Metrics
-        self.bleu3 = BLEU(test_text=tensor_to_tokens(self.gen_data.target, self.index_word_dict),
-                          real_text=tensor_to_tokens(self.test_data.target, self.index_word_dict),
+        self.bleu = BLEU(test_text=tensor_to_tokens(self.gen_data.target, self.index_word_dict),
+                         real_text=tensor_to_tokens(self.test_data.target, self.test_data.index_word_dict), gram=3)
+        self.self_bleu = BLEU(test_text=tensor_to_tokens(self.gen_data.target, self.index_word_dict),
+                              real_text=tensor_to_tokens(self.gen_data.target, self.index_word_dict),
                           gram=3)
 
     def _run(self):
@@ -97,7 +100,7 @@ class SeqGANInstructor(BasicInstructor):
         for epoch in range(epochs):
             self.sig.update()
             if self.sig.pre_sig:
-                pre_loss = self.train_gen_epoch(self.gen, self.oracle_data.loader, self.mle_criterion, self.gen_opt)
+                pre_loss = self.train_gen_epoch(self.gen, self.train_data.loader, self.mle_criterion, self.gen_opt)
 
                 # =====Test=====
                 if epoch % cfg.pre_log_step == 0:
@@ -124,7 +127,7 @@ class SeqGANInstructor(BasicInstructor):
             # =====Train=====
             rewards = rollout_func.get_reward(target, cfg.rollout_num, self.dis)
             adv_loss = self.gen.batchPGLoss(inp, target, rewards)
-            self.optimize(self.gen_opt, adv_loss)
+            self.optimize(self.gen_adv_opt, adv_loss)
             total_g_loss += adv_loss.item()
 
         # =====Test=====
@@ -138,7 +141,7 @@ class SeqGANInstructor(BasicInstructor):
         # prepare loader for validate
         for step in range(d_step):
             # prepare loader for training
-            pos_samples = self.oracle_data.target
+            pos_samples = self.train_data.target
             neg_samples = self.gen.sample(cfg.samples_num, 4 * cfg.batch_size)
             self.dis_data.reset(pos_samples, neg_samples)
 
@@ -150,3 +153,6 @@ class SeqGANInstructor(BasicInstructor):
             # =====Test=====
             self.log.info('[%s-DIS] d_step %d: d_loss = %.4f, train_acc = %.4f,' % (
                 phrase, step, d_loss, train_acc))
+
+            if cfg.if_save and not cfg.if_test:
+                torch.save(self.dis.state_dict(), cfg.pretrained_dis_path)

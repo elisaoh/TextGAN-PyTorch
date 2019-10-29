@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import config as cfg
+from utils.data_loader import GenDataIter
 
 
 class Signal:
@@ -59,20 +59,29 @@ def create_logger(name, silent=False, to_disk=False, log_file=None):
 
 def create_oracle():
     """Create a new Oracle model and Oracle's samples"""
+    import config as cfg
     from models.Oracle import Oracle
+    from instructor.oracle_data.instructor import BasicInstructor
+
     print('Creating Oracle...')
     oracle = Oracle(cfg.gen_embed_dim, cfg.gen_hidden_dim, cfg.vocab_size,
                     cfg.max_seq_len, cfg.padding_idx, gpu=cfg.CUDA)
-    oracle = oracle.cuda()
+    if cfg.CUDA:
+        oracle = oracle.cuda()
 
     torch.save(oracle.state_dict(), cfg.oracle_state_dict_path)
 
+    big_samples = oracle.sample(cfg.samples_num, 4 * cfg.batch_size)
     # large
-    torch.save(oracle.sample(cfg.samples_num, 4 * cfg.batch_size),
-               cfg.oracle_samples_path.format(cfg.samples_num))
+    torch.save(big_samples, cfg.oracle_samples_path.format(cfg.samples_num))
     # small
     torch.save(oracle.sample(cfg.samples_num // 2, 4 * cfg.batch_size),
                cfg.oracle_samples_path.format(cfg.samples_num // 2))
+
+    oracle_data = GenDataIter(big_samples)
+    mle_criterion = nn.NLLLoss()
+    groud_truth = BasicInstructor.eval_gen(oracle, oracle_data.loader, mle_criterion)
+    print('NLL_Oracle Groud Truth: %.4f' % groud_truth)
 
 
 def get_fixed_temperature(temper, i, N, adapt):
@@ -80,7 +89,7 @@ def get_fixed_temperature(temper, i, N, adapt):
     N = 5000
 
     if adapt == 'no':
-        temper_var_np = temper  # no increase
+        temper_var_np = 1.0  # no increase, origin: temper
     elif adapt == 'lin':
         temper_var_np = 1 + i / (N - 1) * (temper - 1)  # linear increase
     elif adapt == 'exp':
@@ -135,7 +144,7 @@ def get_losses(d_out_real, d_out_fake, loss_type='JS'):
         d_loss = torch.mean(nn.Tanh(d_out_fake) - nn.Tanh(d_out_real))
         g_loss = torch.mean(-nn.Tanh(d_out_fake))
 
-    elif loss_type == 'RSGAN':  # relativistic standard GAN
+    elif loss_type == 'rsgan':  # relativistic standard GAN
         d_loss = bce_loss(d_out_real - d_out_fake, torch.ones_like(d_out_real))
         g_loss = bce_loss(d_out_fake - d_out_real, torch.ones_like(d_out_fake))
 

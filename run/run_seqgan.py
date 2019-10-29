@@ -35,7 +35,8 @@ run_model = 'seqgan'
 CUDA = int(True)
 if_real_data = [int(False), int(True)]
 data_shuffle = int(False)
-use_truncated_normal = int(False)
+gen_init = 'normal'
+dis_init = 'uniform'
 oracle_pretrain = int(True)
 gen_pretrain = int(False)
 dis_pretrain = int(False)
@@ -60,15 +61,15 @@ adv_log_step = 1
 
 # =====Generator=====
 ADV_g_step = 1
-rollout_num = 32
+rollout_num = 16
 gen_embed_dim = 32
 gen_hidden_dim = 32
 
 # =====Discriminator=====
-d_step = 50
+d_step = 5
 d_epoch = 3
-ADV_d_step = 5
-ADV_d_epoch = 3
+ADV_d_step = 4
+ADV_d_epoch = 2
 dis_embed_dim = 64
 dis_hidden_dim = 64
 
@@ -86,9 +87,10 @@ args = [
     '--model_type', model_type,
     '--loss_type', loss_type,
     '--cuda', CUDA,
-    # '--device', gpu_id,   # comment for auto GPU
+    # '--device', 0,  # comment for auto GPU
     '--shuffle', data_shuffle,
-    '--use_truncated_normal', use_truncated_normal,
+    '--gen_init', gen_init,
+    '--dis_init', dis_init,
 
     # Basic Train
     '--samples_num', samples_num,
